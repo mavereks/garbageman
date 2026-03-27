@@ -4,9 +4,16 @@
 <meta charset="UTF-8">
 <title>Garbage Man</title>
 <style>
+  /* ── Reset ───────────────────────────────────────────────── */
   * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  /* ── Page ────────────────────────────────────────────────── */
   body {
-    background: #0d1a0d;
+    background-color: #050a05;
+    background-image:
+      radial-gradient(ellipse at center, #0d2010 0%, #050a05 72%),
+      radial-gradient(circle, #1a2e1a 1px, transparent 1px);
+    background-size: auto, 24px 24px;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -16,32 +23,100 @@
     user-select: none;
     -webkit-user-select: none;
   }
+
+  /* ── Title ───────────────────────────────────────────────── */
   h1 {
     color: #7ac142;
-    font-size: 1.9rem;
+    font-size: 2rem;
     letter-spacing: 5px;
-    margin-bottom: 10px;
-    text-shadow: 0 0 18px #3a7a1a66;
+    margin-bottom: 4px;
+    animation: titlePulse 3s ease-in-out infinite;
   }
+
+  @keyframes titlePulse {
+    0%, 100% {
+      text-shadow: 0 0 14px #3a7a1a55, 0 0 28px #3a7a1a22;
+      letter-spacing: 5px;
+    }
+    50% {
+      text-shadow: 0 0 22px #7ac14299, 0 0 48px #5caa2055, 0 0 80px #3a7a1a22;
+      letter-spacing: 6px;
+    }
+  }
+
+  /* ── Tagline ─────────────────────────────────────────────── */
+  .tagline {
+    color: #3a5a3a;
+    font-size: 10px;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+    animation: fadePulse 2.5s ease-in-out infinite;
+  }
+
+  /* ── Canvas wrapper ──────────────────────────────────────── */
+  .game-wrap {
+    position: relative;
+    display: inline-block;
+    border-radius: 8px;
+    /* --danger is set per-frame by JS */
+    box-shadow:
+      0 0 0 2px #1a3a1a,
+      0 0 18px 3px var(--danger, #2a5a2a55),
+      0 8px 40px rgba(0,0,0,.7);
+    transition: box-shadow 0.25s ease;
+  }
+
+  /* ── Canvas ──────────────────────────────────────────────── */
   canvas {
     display: block;
-    border: 2px solid #2a4a2a;
     border-radius: 6px;
     touch-action: none;
     cursor: default;
   }
+
+  /* ── CRT scanline overlay ────────────────────────────────── */
+  .scanlines {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    border-radius: 6px;
+    z-index: 1;
+    background: repeating-linear-gradient(
+      to bottom,
+      transparent,
+      transparent 2px,
+      rgba(0, 0, 0, 0.065) 2px,
+      rgba(0, 0, 0, 0.065) 4px
+    );
+    mix-blend-mode: overlay;
+  }
+
+  /* ── Hint / subtitle ─────────────────────────────────────── */
   #hint {
-    color: #3a5a3a;
+    color: #5a8a5a;
     font-size: 11px;
-    letter-spacing: 2px;
-    margin-top: 8px;
+    letter-spacing: 3px;
+    margin-top: 10px;
+    text-transform: uppercase;
+    animation: fadePulse 2.8s ease-in-out infinite;
+  }
+
+  @keyframes fadePulse {
+    0%, 100% { opacity: 0.45; }
+    50%       { opacity: 1.0;  }
   }
 </style>
 </head>
 <body>
+
 <h1>🗑 GARBAGE MAN</h1>
-<canvas id="c" width="600" height="580"></canvas>
-<p id="hint">DRAG ITEMS TO THE CORRECT BIN BEFORE THEY FALL</p>
+<p class="tagline">Sort right &nbsp;·&nbsp; Stay slim</p>
+<div class="game-wrap" id="gameWrap">
+  <canvas id="c" width="600" height="580"></canvas>
+  <div class="scanlines"></div>
+</div>
+<p id="hint">Drag items to the correct bin before they fall</p>
 
 <script>
 const canvas = document.getElementById('c');
@@ -49,9 +124,11 @@ const ctx    = canvas.getContext('2d');
 const W = 600, H = 580;
 const BIN_Y = 458, BIN_H = 112;
 const MAX_SCALE = 3.0, MIN_SCALE = 0.7;
+const gameWrap = document.getElementById('gameWrap');
 
 // ── Data ──────────────────────────────────────────────────────
 const ITEM_DATA = [
+  // ── Regular items ──────────────────────────────────────────
   { name: 'Apple Core',     emoji: '🍎', cat: 'compost'   },
   { name: 'Banana Peel',    emoji: '🍌', cat: 'compost'   },
   { name: 'Coffee Grounds', emoji: '☕', cat: 'compost'   },
@@ -62,6 +139,20 @@ const ITEM_DATA = [
   { name: 'Chip Bag',       emoji: '🍿', cat: 'garbage'   },
   { name: 'Styrofoam Cup',  emoji: '🥤', cat: 'garbage'   },
   { name: 'Candy Wrapper',  emoji: '🍬', cat: 'garbage'   },
+  // ── Bonus "commonly mis-sorted" items ──────────────────────
+  { name: 'Pizza Box',      emoji: '🍕', cat: 'garbage',   bonus: true },
+  { name: 'Plastic Bag',    emoji: '🛍️', cat: 'garbage',   bonus: true },
+  { name: 'Foam Container', emoji: '🥡', cat: 'garbage',   bonus: true },
+  { name: 'Battery',        emoji: '🔋', cat: 'garbage',   bonus: true },
+  // ── Ambiguous items — unlocked at higher levels ────────────
+  // Egg cartons are food-residue cardboard → COMPOST (people assume recycling)
+  { name: 'Egg Carton',     emoji: '🥚', cat: 'compost',   ambiguous: true, minLevel: 3 },
+  // Steel & aluminium cans ARE recyclable (people toss them) → RECYCLING
+  { name: 'Tin Can',        emoji: '🥫', cat: 'recycling', ambiguous: true, minLevel: 3 },
+  // Shredded paper fibres are too short to recycle → GARBAGE
+  { name: 'Shredded Paper', emoji: '📄', cat: 'garbage',   ambiguous: true, minLevel: 4 },
+  // Multi-layer juice boxes can't be curbside recycled → GARBAGE
+  { name: 'Juice Box',      emoji: '🧃', cat: 'garbage',   ambiguous: true, minLevel: 4 },
 ];
 
 const BINS = [
@@ -76,6 +167,12 @@ const BINS = [
     x: 410, y: BIN_Y, w: 172, h: BIN_H },
 ];
 
+const BURST_PALETTES = {
+  compost:   ['#7ac142','#a8d96a','#c8f08f','#4d7c2e','#e0ff88'],
+  recycling: ['#3d85d4','#6aaff0','#99ccff','#1e5b9e','#c0e8ff'],
+  garbage:   ['#9a9a9a','#c8c8c8','#e8e8e8','#585858','#fff'],
+};
+
 // ── State ─────────────────────────────────────────────────────
 let st = newState();
 
@@ -85,10 +182,14 @@ function newState() {
     items: [], drag: null, feedback: [],
     binFlash: {}, spawnTimer: 0, spawnInterval: 200,
     over: false, uid: 0,
+    particles: [],   // burst / smoke / spark particles
+    clouds:    [],   // methane cloud puffs
+    cloudTimer: 0,   // fractional spawn accumulator
+    level: 1, correctSorts: 0, paused: false, levelUpAnim: 0,
   };
 }
 
-// ── Helpers ───────────────────────────────────────────────────
+// ── Core helpers ──────────────────────────────────────────────
 function rr(x, y, w, h, r = 8) {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
@@ -105,19 +206,314 @@ function rr(x, y, w, h, r = 8) {
 
 function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 
+// Elastic ease-out — item pops in with slight overshoot
+function easeOutElastic(t) {
+  if (t <= 0) return 0;
+  if (t >= 1) return 1;
+  const c4 = (2 * Math.PI) / 3;
+  return Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * c4) + 1;
+}
+
+// ── Item spawner ──────────────────────────────────────────────
 function spawnItem() {
-  const t = ITEM_DATA[Math.floor(Math.random() * ITEM_DATA.length)];
+  const pool = ITEM_DATA.filter(t => !t.minLevel || t.minLevel <= st.level);
+  const t    = pool[Math.floor(Math.random() * pool.length)];
+  const bx   = 65 + Math.random() * (W - 130);
+  const speedMult = clamp(1 + (st.level - 1) * 0.18, 1, 3);
   st.items.push({
     id: st.uid++,
     name: t.name, emoji: t.emoji, cat: t.cat,
-    x: 65 + Math.random() * (W - 130),
-    y: -45,
-    vy: 0.45 + Math.random() * 0.4,
+    bonus: t.bonus || false, ambiguous: t.ambiguous || false,
+    x: bx, y: -45,
+    vy: (0.45 + Math.random() * 0.4) * speedMult,
     w: 88, h: 54,
+    // wobble / entrance
+    baseX:       bx,
+    wobbleAmp:   8  + Math.random() * 10,
+    wobblePhase: Math.random() * Math.PI * 2,
+    wobbleFreq:  0.025 + Math.random() * 0.015,
+    enterT:      0,
+    rotation:    0,
   });
 }
 
-// ── Draw: background ─────────────────────────────────────────
+// ── Particle system ───────────────────────────────────────────
+function spawnBurst(bx, by, bin) {
+  const count  = 24 + Math.floor(Math.random() * 7);
+  const colors = BURST_PALETTES[bin.cat];
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 2.5 + Math.random() * 4.5;
+    st.particles.push({
+      x: bx, y: by,
+      vx: Math.cos(angle) * speed,
+      vy: -(1.5 + Math.random() * 3.5),
+      life: 60, maxLife: 60,
+      r: 3 + Math.random() * 4,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      rotation: Math.random() * Math.PI * 2,
+      vr: (Math.random() - 0.5) * 0.28,
+      shape: Math.random() < 0.6 ? 'rect' : 'circle',
+      type: 'confetti',
+    });
+  }
+}
+
+function spawnBonusBurst(bx, by) {
+  // More particles, all gold — triggered by a correct bonus sort
+  const GOLD = ['#FFD700','#FFC200','#FFE55C','#FFAA00','#FFF0A0','#ffffff'];
+  const count = 40 + Math.floor(Math.random() * 8);
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 3 + Math.random() * 5.5;
+    st.particles.push({
+      x: bx, y: by,
+      vx: Math.cos(angle) * speed,
+      vy: -(2.2 + Math.random() * 4.2),
+      life: 72, maxLife: 72,
+      r: 3 + Math.random() * 5,
+      color: GOLD[Math.floor(Math.random() * GOLD.length)],
+      rotation: Math.random() * Math.PI * 2,
+      vr: (Math.random() - 0.5) * 0.34,
+      shape: Math.random() < 0.65 ? 'rect' : 'circle',
+      type: 'confetti',
+    });
+  }
+  // Bright star-sparkle streaks radiating outward
+  for (let i = 0; i < 8; i++) {
+    const angle = (i / 8) * Math.PI * 2;
+    st.particles.push({
+      x: bx, y: by,
+      vx: Math.cos(angle) * (2.5 + Math.random() * 2),
+      vy: Math.sin(angle) * (2.5 + Math.random() * 2),
+      life: 45, maxLife: 45,
+      r: 2 + Math.random() * 2,
+      color: '#FFE55C',
+      rotation: angle, vr: 0.08,
+      shape: 'circle', type: 'spark',
+    });
+  }
+}
+
+function spawnSmoke(x, y) {
+  const count = 10 + Math.floor(Math.random() * 5);
+  for (let i = 0; i < count; i++) {
+    st.particles.push({
+      x: x + (Math.random() - 0.5) * 44,
+      y: y + (Math.random() - 0.5) * 10,
+      vx: (Math.random() - 0.5) * 0.7,
+      vy: -(0.3 + Math.random() * 0.8),
+      life: 55 + Math.floor(Math.random() * 20),
+      maxLife: 75,
+      r: 8 + Math.random() * 10,
+      color: Math.random() < 0.55 ? '#4a4a4a' : '#7a6a55',
+      rotation: 0, vr: 0,
+      shape: 'circle', type: 'smoke',
+    });
+  }
+}
+
+function spawnSparks(x, y) {
+  for (let i = 0; i < 9; i++) {
+    const angle = -(0.4 + Math.random() * 2.3); // biased upward
+    const speed = 3 + Math.random() * 4.5;
+    st.particles.push({
+      x: x + (Math.random() - 0.5) * 28,
+      y: y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 35 + Math.floor(Math.random() * 15),
+      maxLife: 50,
+      r: 2 + Math.random() * 2.5,
+      color: Math.random() < 0.5 ? '#f0ad4e' : '#ff8800',
+      rotation: 0, vr: 0,
+      shape: 'circle', type: 'spark',
+    });
+  }
+}
+
+function updateParticles() {
+  for (let i = st.particles.length - 1; i >= 0; i--) {
+    const p = st.particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.rotation += p.vr;
+    p.life--;
+    if      (p.type === 'confetti') { p.vy += 0.13; p.vx *= 0.98; }
+    else if (p.type === 'smoke')    { p.r  += 0.18; p.vx *= 0.97; p.vy *= 0.97; }
+    else if (p.type === 'spark')    { p.vy += 0.18; p.vx *= 0.94; }
+    if (p.life <= 0) st.particles.splice(i, 1);
+  }
+}
+
+function drawParticles() {
+  for (const p of st.particles) {
+    const a = p.life / p.maxLife;
+    ctx.save();
+    ctx.globalAlpha = p.type === 'smoke' ? a * 0.44 : a;
+    ctx.translate(p.x, p.y);
+    ctx.rotate(p.rotation);
+
+    if (p.type === 'smoke') {
+      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, p.r);
+      g.addColorStop(0,   p.color + 'cc');
+      g.addColorStop(1,   p.color + '00');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(0, 0, p.r, 0, Math.PI * 2); ctx.fill();
+    } else if (p.shape === 'rect') {
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.r, -p.r * 1.7, p.r * 2, p.r * 3.4);
+    } else {
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(0, 0, p.r, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
+// ── Methane cloud system ──────────────────────────────────────
+function updateClouds() {
+  // Spawn rate (puffs / second) ramps from 0 at scale=1.1 to ~8 at MAX_SCALE
+  const rate = Math.max(0, (st.scale - 1.1) * 4.2);
+  st.cloudTimer += rate / 60;
+
+  while (st.cloudTimer >= 1) {
+    st.cloudTimer -= 1;
+    const charCx = W / 2;
+    const charCy = 220;
+    st.clouds.push({
+      x:        charCx + (Math.random() - 0.5) * 32,
+      y:        charCy + 18 + (Math.random() - 0.5) * 22,
+      r:        18 + Math.random() * 17,
+      alpha:    0,
+      maxAlpha: 0.18 + Math.random() * 0.18,
+      vy:       -(0.4 + Math.random() * 0.4),
+      life:     90, maxLife: 90,
+    });
+  }
+
+  for (let i = st.clouds.length - 1; i >= 0; i--) {
+    const c = st.clouds[i];
+    c.y += c.vy;
+    c.x += (Math.random() - 0.5) * 0.3;
+    c.life--;
+    const age = c.maxLife - c.life;
+    if      (age  < 15)       c.alpha = c.maxAlpha * (age / 15);
+    else if (c.life < 25)     c.alpha = c.maxAlpha * (c.life / 25);
+    else                      c.alpha = c.maxAlpha;
+    if (c.life <= 0) st.clouds.splice(i, 1);
+  }
+}
+
+function drawClouds() {
+  for (const c of st.clouds) {
+    ctx.save();
+    ctx.globalAlpha = c.alpha;
+    const g = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, c.r);
+    g.addColorStop(0,   'rgba(190,230,20,0.85)');
+    g.addColorStop(0.45,'rgba(155,195,10,0.55)');
+    g.addColorStop(1,   'rgba(130,160,5,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+}
+
+// ── Audio ─────────────────────────────────────────────────────
+let audioCtx = null;
+
+function initAudio() {
+  if (audioCtx) return;
+  try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {}
+}
+
+function playNote(freq, type, dur, gain, delay = 0) {
+  if (!audioCtx) return;
+  const osc = audioCtx.createOscillator();
+  const gn  = audioCtx.createGain();
+  osc.connect(gn); gn.connect(audioCtx.destination);
+  osc.type = type;
+  const t0 = audioCtx.currentTime + delay;
+  osc.frequency.setValueAtTime(freq, t0);
+  gn.gain.setValueAtTime(gain, t0);
+  gn.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  osc.start(t0);
+  osc.stop(t0 + dur + 0.01);
+}
+
+function sfxPickup() {
+  if (!audioCtx) return;
+  const osc = audioCtx.createOscillator();
+  const gn  = audioCtx.createGain();
+  osc.connect(gn); gn.connect(audioCtx.destination);
+  osc.type = 'sine';
+  const t0 = audioCtx.currentTime;
+  osc.frequency.setValueAtTime(240, t0);
+  osc.frequency.linearRampToValueAtTime(480, t0 + 0.06);
+  gn.gain.setValueAtTime(0.22, t0);
+  gn.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.08);
+  osc.start(t0); osc.stop(t0 + 0.09);
+}
+
+function sfxCorrect() {
+  playNote(523, 'sine', 0.12, 0.28, 0.00);
+  playNote(659, 'sine', 0.12, 0.28, 0.10);
+  playNote(784, 'sine', 0.18, 0.28, 0.20);
+}
+
+function sfxWrong() {
+  if (!audioCtx) return;
+  const osc = audioCtx.createOscillator();
+  const gn  = audioCtx.createGain();
+  osc.connect(gn); gn.connect(audioCtx.destination);
+  osc.type = 'sawtooth';
+  const t0 = audioCtx.currentTime;
+  osc.frequency.setValueAtTime(290, t0);
+  osc.frequency.exponentialRampToValueAtTime(75, t0 + 0.32);
+  gn.gain.setValueAtTime(0.28, t0);
+  gn.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.34);
+  osc.start(t0); osc.stop(t0 + 0.36);
+}
+
+function sfxMiss() {
+  if (!audioCtx) return;
+  const sr  = audioCtx.sampleRate;
+  const len = Math.floor(sr * 0.12);
+  const buf = audioCtx.createBuffer(1, len, sr);
+  const dat = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) dat[i] = (Math.random() * 2 - 1) * (1 - i / len);
+  const src = audioCtx.createBufferSource();
+  const gn  = audioCtx.createGain();
+  src.buffer = buf;
+  src.connect(gn); gn.connect(audioCtx.destination);
+  gn.gain.setValueAtTime(0.32, audioCtx.currentTime);
+  src.start(audioCtx.currentTime);
+}
+
+function sfxGameOver() {
+  [440, 370, 311, 261].forEach((f, i) => playNote(f, 'sine', 0.22, 0.32, i * 0.24));
+}
+
+function sfxBonusCorrect() {
+  // Shimmering ascending fanfare — triangle wave for brightness
+  [523, 659, 784, 1047, 1319].forEach((f, i) => {
+    playNote(f, 'triangle', 0.11, 0.24, i * 0.07);
+  });
+  // Sparkle tail — short high sine ping
+  playNote(1568, 'sine', 0.18, 0.18, 0.42);
+}
+
+function sfxLevelUp() {
+  [392, 523, 659, 784].forEach((f, i) => playNote(f, 'triangle', 0.2, 0.25, i * 0.06));
+  playNote(1047, 'sine', 0.3, 0.2, 0.28);
+}
+
+function sfxPause() {
+  playNote(660, 'sine', 0.08, 0.15, 0);
+  playNote(440, 'sine', 0.08, 0.15, 0.08);
+}
+
+// ── Draw: background ──────────────────────────────────────────
 function drawBG() {
   const g = ctx.createLinearGradient(0, 0, 0, H);
   g.addColorStop(0,    '#141f0f');
@@ -126,14 +522,12 @@ function drawBG() {
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, W, H);
 
-  // subtle horizontal rules
   ctx.strokeStyle = '#192614';
   ctx.lineWidth = 1;
   for (let y = 50; y < BIN_Y - 20; y += 70) {
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
   }
 
-  // ground slab
   ctx.fillStyle = '#1c2a18';
   ctx.fillRect(0, BIN_Y - 14, W, H - BIN_Y + 14);
   ctx.strokeStyle = '#3a5a2a';
@@ -146,43 +540,34 @@ function drawBins() {
   BINS.forEach((b, i) => {
     const flash = (st.binFlash[i] || 0) > 0;
 
-    // shadow
     ctx.fillStyle = 'rgba(0,0,0,.45)';
     rr(b.x + 5, b.y + 7, b.w, b.h, 8); ctx.fill();
 
-    // body
     ctx.fillStyle = b.color;
     rr(b.x, b.y, b.w, b.h, 8); ctx.fill();
 
-    // flash highlight
     if (flash) {
-      ctx.fillStyle = 'rgba(255,255,255,.18)';
+      ctx.fillStyle = 'rgba(255,255,255,.2)';
       rr(b.x, b.y, b.w, b.h, 8); ctx.fill();
     }
 
-    // inner dark cavity
     ctx.fillStyle = b.dark;
     rr(b.x + 8, b.y + 34, b.w - 16, b.h - 40, 4); ctx.fill();
 
-    // rim strip
     ctx.fillStyle = b.rim;
     ctx.fillRect(b.x - 4, b.y, b.w + 8, 16);
 
-    // lid handle
     ctx.fillStyle = b.dark;
     rr(b.x + b.w / 2 - 11, b.y - 9, 22, 11, 4); ctx.fill();
     ctx.fillStyle = b.rim;
     rr(b.x + b.w / 2 - 11, b.y - 9, 22, 11, 4);
     ctx.lineWidth = 1.5; ctx.strokeStyle = b.dark; ctx.stroke();
 
-    // label
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 12px "Courier New"';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(b.label, b.x + b.w / 2, b.y + 24);
 
-    // icon emoji
     ctx.font = '26px sans-serif';
     ctx.fillText(b.icon, b.x + b.w / 2, b.y + 76);
   });
@@ -201,104 +586,77 @@ function drawCharacter(scale) {
   const body = `rgb(${bR},${bG},38)`;
   const skin = `hsl(${28 - bad * 14},${68 - bad * 18}%,${66 - bad * 10}%)`;
 
-  // ground shadow
   ctx.fillStyle = 'rgba(0,0,0,.22)';
-  ctx.beginPath();
-  ctx.ellipse(0, 70, 24, 7, 0, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.beginPath(); ctx.ellipse(0, 70, 24, 7, 0, 0, Math.PI * 2); ctx.fill();
 
-  // legs
   ctx.strokeStyle = '#222'; ctx.lineWidth = 6.5; ctx.lineCap = 'round';
   ctx.beginPath(); ctx.moveTo(-8, 37); ctx.lineTo(-11, 65); ctx.stroke();
   ctx.beginPath(); ctx.moveTo( 8, 37); ctx.lineTo( 11, 65); ctx.stroke();
 
-  // boots
   ctx.fillStyle = '#111';
   ctx.beginPath(); ctx.ellipse(-14, 67, 10, 4.5, -0.15, 0, Math.PI * 2); ctx.fill();
   ctx.beginPath(); ctx.ellipse( 14, 67, 10, 4.5,  0.15, 0, Math.PI * 2); ctx.fill();
 
-  // body
   ctx.fillStyle = body;
   rr(-17, -2, 34, 40, 7); ctx.fill();
 
-  // vest stripes
   ctx.strokeStyle = `rgba(255,255,100,${0.22 + bad * 0.1})`; ctx.lineWidth = 2.5;
-  ctx.beginPath(); ctx.moveTo(-17, 8); ctx.lineTo(17, 8); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(-17,20); ctx.lineTo(17,20); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-17, 8);  ctx.lineTo(17, 8);  ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-17, 20); ctx.lineTo(17, 20); ctx.stroke();
 
-  // belt
   ctx.fillStyle = '#111'; ctx.fillRect(-17, 29, 34, 5);
-  ctx.fillStyle = '#c8a000';
-  rr(-5, 27, 10, 8, 2); ctx.fill();
+  ctx.fillStyle = '#c8a000'; rr(-5, 27, 10, 8, 2); ctx.fill();
 
-  // arms
   ctx.strokeStyle = body; ctx.lineWidth = 7.5; ctx.lineCap = 'round';
   ctx.beginPath(); ctx.moveTo(-17, 6); ctx.lineTo(-31, 27); ctx.stroke();
   ctx.beginPath(); ctx.moveTo( 17, 6); ctx.lineTo( 31, 27); ctx.stroke();
 
-  // gloves
   ctx.fillStyle = '#d8c850';
   ctx.beginPath(); ctx.arc(-31, 28, 6.5, 0, Math.PI * 2); ctx.fill();
   ctx.beginPath(); ctx.arc( 31, 28, 6.5, 0, Math.PI * 2); ctx.fill();
 
-  // neck
   ctx.fillStyle = skin; ctx.fillRect(-5, -10, 10, 12);
 
-  // head
   ctx.fillStyle = skin;
   ctx.beginPath(); ctx.arc(0, -22, 17, 0, Math.PI * 2); ctx.fill();
 
-  // blush when bad
   if (bad > 0.28) {
     ctx.fillStyle = `rgba(220,70,70,${bad * 0.32})`;
     ctx.beginPath(); ctx.arc(-8, -18, 6.5, 0, Math.PI * 2); ctx.fill();
     ctx.beginPath(); ctx.arc( 8, -18, 6.5, 0, Math.PI * 2); ctx.fill();
   }
 
-  // eye whites
   ctx.fillStyle = '#fff';
   ctx.beginPath(); ctx.arc(-6.5, -24, 4.5, 0, Math.PI * 2); ctx.fill();
   ctx.beginPath(); ctx.arc( 6.5, -24, 4.5, 0, Math.PI * 2); ctx.fill();
 
-  // pupils (look up when happy, forward when scared)
   const py = bad > 0.5 ? -23 : -25;
   ctx.fillStyle = '#1a1a1a';
   ctx.beginPath(); ctx.arc(-6.5, py, 2.6, 0, Math.PI * 2); ctx.fill();
   ctx.beginPath(); ctx.arc( 6.5, py, 2.6, 0, Math.PI * 2); ctx.fill();
 
-  // eyebrows
   ctx.strokeStyle = '#2a2a2a'; ctx.lineWidth = 2.2; ctx.lineCap = 'round';
   ctx.beginPath();
   if (bad > 0.5) {
-    // worried V shape
     ctx.moveTo(-11, -31); ctx.lineTo(-3.5, -33.5);
     ctx.moveTo( 11, -31); ctx.lineTo( 3.5, -33.5);
   } else {
-    // neutral/happy
     ctx.moveTo(-11, -32); ctx.lineTo(-2.5, -30);
     ctx.moveTo( 11, -32); ctx.lineTo( 2.5, -30);
   }
   ctx.stroke();
 
-  // mouth
   ctx.strokeStyle = '#554'; ctx.lineWidth = 2; ctx.lineCap = 'round';
   ctx.beginPath();
   if (bad > 0.5) {
-    ctx.moveTo(-6, -14); ctx.quadraticCurveTo(0, -17.5, 6, -14); // frown
+    ctx.moveTo(-6, -14); ctx.quadraticCurveTo(0, -17.5, 6, -14);
   } else {
-    ctx.moveTo(-6, -14); ctx.quadraticCurveTo(0, -10.5, 6, -14); // smile
+    ctx.moveTo(-6, -14); ctx.quadraticCurveTo(0, -10.5, 6, -14);
   }
   ctx.stroke();
 
-  // hat brim
-  ctx.fillStyle = '#1a3a1a';
-  ctx.fillRect(-21, -41, 42, 12);
-
-  // hat crown
-  ctx.fillStyle = '#264826';
-  rr(-15, -59, 30, 20, 3); ctx.fill();
-
-  // hat badge (star)
+  ctx.fillStyle = '#1a3a1a'; ctx.fillRect(-21, -41, 42, 12);
+  ctx.fillStyle = '#264826'; rr(-15, -59, 30, 20, 3); ctx.fill();
   ctx.fillStyle = '#c8a000';
   ctx.beginPath(); ctx.arc(0, -49, 5.5, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = '#fff';
@@ -309,43 +667,142 @@ function drawCharacter(scale) {
   ctx.restore();
 }
 
-// ── Draw: falling item ────────────────────────────────────────
+// ── Draw: falling item (with wobble rotation + entrance scale) ─
+const CAT_COLOR = { compost: '#6bb03f', recycling: '#3d85d4', garbage: '#8a8a8a' };
+
 function drawItem(item) {
   const dragging = st.drag && st.drag.item.id === item.id;
-  const x = item.x - item.w / 2;
-  const y = item.y - item.h / 2;
+  const es  = easeOutElastic(item.enterT);
+  const now = Date.now();
 
-  // drop shadow when held
-  if (dragging) {
-    ctx.fillStyle = 'rgba(0,0,0,.32)';
-    rr(x + 6, y + 6, item.w, item.h, 10); ctx.fill();
+  ctx.save();
+  ctx.translate(item.x, item.y);
+  ctx.rotate(item.rotation);
+  ctx.scale(es, es);
+
+  const hw = item.w / 2, hh = item.h / 2;
+
+  // ── Bonus: animated outer golden glow ring ─────────────────
+  if (item.bonus) {
+    const pulse = 0.55 + 0.45 * Math.sin(now / 380);
+    ctx.save();
+    ctx.shadowColor = '#FFD700';
+    ctx.shadowBlur  = 12 + pulse * 14;
+    ctx.strokeStyle = `rgba(255,215,0,${0.45 + 0.55 * pulse})`;
+    ctx.lineWidth   = 2.8;
+    rr(-hw - 4, -hh - 4, item.w + 8, item.h + 8, 13);
+    ctx.stroke();
+    ctx.restore();
   }
 
-  ctx.fillStyle = dragging ? '#fffff2ee' : '#ffffffcc';
-  rr(x, y, item.w, item.h, 10); ctx.fill();
+  // ── Ambiguous: animated outer purple glow ring ──────────────
+  if (item.ambiguous) {
+    const pulse = 0.55 + 0.45 * Math.sin(now / 420);
+    ctx.save();
+    ctx.shadowColor = '#cc88ff';
+    ctx.shadowBlur  = 10 + pulse * 12;
+    ctx.strokeStyle = `rgba(180,100,255,${0.45 + 0.50 * pulse})`;
+    ctx.lineWidth   = 2.8;
+    rr(-hw - 4, -hh - 4, item.w + 8, item.h + 8, 13);
+    ctx.stroke();
+    ctx.restore();
+  }
 
-  ctx.strokeStyle = dragging ? '#555' : '#aaa';
-  ctx.lineWidth = 1.5;
-  rr(x, y, item.w, item.h, 10); ctx.stroke();
+  // ── Drop shadow ────────────────────────────────────────────
+  if (dragging) {
+    ctx.fillStyle = 'rgba(0,0,0,.45)';
+    rr(-hw + 7, -hh + 7, item.w + 4, item.h + 4, 10); ctx.fill();
+  } else {
+    ctx.fillStyle = 'rgba(0,0,0,.22)';
+    rr(-hw + 4, -hh + 4, item.w, item.h, 10); ctx.fill();
+  }
 
-  // emoji
-  ctx.font = '23px sans-serif';
-  ctx.textAlign = 'center';
+  // ── Card background ────────────────────────────────────────
+  ctx.fillStyle = item.bonus
+    ? (dragging ? '#fffdf0f0' : '#fffde8d0')
+    : item.ambiguous
+      ? (dragging ? '#f8f0ffee' : '#f4eaffcc')
+      : (dragging ? '#fffff2f2' : '#ffffffcc');
+  rr(-hw, -hh, item.w, item.h, 10); ctx.fill();
+
+  // ── Card border ────────────────────────────────────────────
+  if (item.bonus) {
+    const bp = 0.6 + 0.4 * Math.sin(now / 380);
+    ctx.strokeStyle = `rgba(200,155,0,${bp})`;
+    ctx.lineWidth   = 2.2;
+  } else if (item.ambiguous) {
+    const ap = 0.6 + 0.4 * Math.sin(now / 420);
+    ctx.strokeStyle = `rgba(160,80,220,${ap})`;
+    ctx.lineWidth   = 2.2;
+  } else {
+    ctx.strokeStyle = dragging ? '#555' : '#aaa';
+    ctx.lineWidth   = dragging ? 2 : 1.5;
+  }
+  rr(-hw, -hh, item.w, item.h, 10); ctx.stroke();
+
+  // ── Top colour stripe ──────────────────────────────────────
+  if (item.bonus) {
+    const sp = 0.45 + 0.35 * Math.sin(now / 380);
+    ctx.fillStyle = `rgba(255,210,0,${sp + 0.15})`;
+  } else if (item.ambiguous) {
+    const sp = 0.45 + 0.35 * Math.sin(now / 420);
+    ctx.fillStyle = `rgba(160,80,220,${sp + 0.15})`;
+  } else {
+    ctx.fillStyle = CAT_COLOR[item.cat] + 'aa';
+  }
+  rr(-hw, -hh, item.w, 5, 10); ctx.fill();
+
+  // ── Emoji ──────────────────────────────────────────────────
+  ctx.font = '22px sans-serif';
+  ctx.textAlign    = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(item.emoji, item.x, item.y - 8);
+  // Bonus/ambiguous items nudge emoji up slightly to fit the badge below
+  ctx.fillText(item.emoji, 0, (item.bonus || item.ambiguous) ? -11 : -8);
 
-  // name
-  ctx.fillStyle = '#333';
-  ctx.font = 'bold 9px "Courier New"';
+  // ── Item name ──────────────────────────────────────────────
+  ctx.fillStyle    = item.bonus ? '#7a5500' : item.ambiguous ? '#4a1a7a' : '#2a2a2a';
+  ctx.font         = `bold 9px "Courier New"`;
   ctx.textBaseline = 'top';
-  ctx.fillText(item.name, item.x, item.y + 10);
+  ctx.fillText(item.name, 0, (item.bonus || item.ambiguous) ? 5 : 10);
+
+  // ── Bonus star badge (top-right corner) ────────────────────
+  if (item.bonus) {
+    const bp = 0.72 + 0.28 * Math.sin(now / 260);
+    ctx.save();
+    ctx.shadowColor = '#FFD700';
+    ctx.shadowBlur  = 6;
+    ctx.fillStyle   = `rgba(255,200,0,${bp})`;
+    ctx.font        = 'bold 10px sans-serif';
+    ctx.textAlign    = 'right';
+    ctx.textBaseline = 'top';
+    ctx.fillText('★2×', hw - 3, -hh + 6);
+    ctx.restore();
+  }
+
+  // ── Ambiguous question-mark badge (bottom-left corner) ─────
+  if (item.ambiguous) {
+    const ap = 0.72 + 0.28 * Math.sin(now / 300);
+    ctx.save();
+    ctx.shadowColor = '#cc88ff';
+    ctx.shadowBlur  = 6;
+    ctx.fillStyle   = `rgba(160,80,220,${ap})`;
+    ctx.font        = 'bold 11px sans-serif';
+    ctx.textAlign    = 'left';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('?', -hw + 5, hh - 4);
+    ctx.restore();
+  }
+
+  ctx.restore();
 }
 
 // ── Draw: HUD ─────────────────────────────────────────────────
 function drawHUD() {
   // score box
-  ctx.fillStyle = 'rgba(0,0,0,.6)';
+  ctx.fillStyle = 'rgba(0,0,0,.62)';
   rr(10, 10, 118, 50, 8); ctx.fill();
+  ctx.strokeStyle = '#2a4a2a'; ctx.lineWidth = 1;
+  rr(10, 10, 118, 50, 8); ctx.stroke();
   ctx.fillStyle = '#6bb03f';
   ctx.font = 'bold 11px "Courier New"';
   ctx.textAlign = 'left'; ctx.textBaseline = 'top';
@@ -355,47 +812,119 @@ function drawHUD() {
   ctx.fillText(String(st.score).padStart(4, '0'), 22, 31);
 
   // hi score box
-  ctx.fillStyle = 'rgba(0,0,0,.6)';
+  ctx.fillStyle = 'rgba(0,0,0,.62)';
   rr(138, 10, 118, 50, 8); ctx.fill();
+  ctx.strokeStyle = '#4a3a0a'; ctx.lineWidth = 1;
+  rr(138, 10, 118, 50, 8); ctx.stroke();
   ctx.fillStyle = '#c8a000';
   ctx.font = 'bold 11px "Courier New"';
-  ctx.textAlign = 'left';
   ctx.fillText('BEST', 150, 17);
   ctx.fillStyle = '#fff';
   ctx.font = 'bold 23px "Courier New"';
   ctx.fillText(String(st.hi).padStart(4, '0'), 150, 31);
 
-  // size meter
-  const mx = 270, my = 12, mw = 220, mh = 16;
-  ctx.fillStyle = 'rgba(0,0,0,.6)';
-  rr(mx - 6, my - 4, mw + 58, mh + 26, 8); ctx.fill();
+  // level box
+  ctx.fillStyle = 'rgba(0,0,0,.62)';
+  rr(266, 10, 82, 50, 8); ctx.fill();
+  ctx.strokeStyle = '#3a1a5a'; ctx.lineWidth = 1;
+  rr(266, 10, 82, 50, 8); ctx.stroke();
+  ctx.fillStyle = '#a060e0';
+  ctx.font = 'bold 11px "Courier New"';
+  ctx.fillText('LEVEL', 278, 17);
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 23px "Courier New"';
+  ctx.fillText(String(st.level).padStart(2, ' '), 278, 31);
 
-  ctx.fillStyle = '#2a3a2a';
+  // size meter
+  const mx = 356, my = 12, mw = 160, mh = 16;
+  ctx.fillStyle = 'rgba(0,0,0,.62)';
+  rr(mx - 6, my - 4, mw + 32, mh + 28, 8); ctx.fill();
+
+  ctx.fillStyle = '#1a2a1a';
   rr(mx, my + 13, mw, mh, 4); ctx.fill();
 
   const pct = clamp((st.scale - 1.0) / (MAX_SCALE - 1.0), 0, 1);
   if (pct > 0.005) {
-    ctx.fillStyle = pct < 0.4 ? '#5cb85c' : pct < 0.72 ? '#f0ad4e' : '#d9534f';
+    // gradient fill for the bar
+    const barGrad = ctx.createLinearGradient(mx, 0, mx + mw, 0);
+    barGrad.addColorStop(0,   '#5cb85c');
+    barGrad.addColorStop(0.4, '#f0ad4e');
+    barGrad.addColorStop(1,   '#d9534f');
+    ctx.fillStyle = barGrad;
     rr(mx, my + 13, mw * pct, mh, 4); ctx.fill();
+
+    // pulsing danger overlay when high
+    if (pct > 0.72) {
+      const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 120);
+      ctx.fillStyle = `rgba(255,60,30,${pulse * 0.25})`;
+      rr(mx, my + 13, mw * pct, mh, 4); ctx.fill();
+    }
   }
 
-  ctx.fillStyle = '#8aa';
+  ctx.fillStyle = '#8aaa88';
   ctx.font = '10px "Courier New"';
   ctx.textAlign = 'left'; ctx.textBaseline = 'top';
   ctx.fillText('SIZE METER', mx, my + 2);
   ctx.textAlign = 'right';
-  ctx.fillStyle = pct > 0.72 ? '#f88' : '#ccc';
+  ctx.fillStyle = pct > 0.72 ? '#ff8888' : '#ccc';
   ctx.fillText(`${Math.round(pct * 100)}%`, mx + mw, my + 2);
+
+  // ── Legend bar (below the HUD boxes) ──────────────────────
+  const lx = 10, ly = 64, lw = W - 20, lh = 20;
+  const now = Date.now();
+  const lp  = 0.5 + 0.5 * Math.sin(now / 700);
+
+  ctx.fillStyle = 'rgba(0,0,0,.55)';
+  rr(lx, ly, lw, lh, 4); ctx.fill();
+
+  // gold left accent bar
+  ctx.fillStyle = `rgba(255,200,0,${0.55 + 0.3 * lp})`;
+  rr(lx, ly, 4, lh, 2); ctx.fill();
+
+  // ★ icon + TRICKY label
+  ctx.save();
+  ctx.shadowColor = '#FFD700'; ctx.shadowBlur = 4 + lp * 5;
+  ctx.fillStyle   = `rgba(255,210,0,${0.8 + 0.2 * lp})`;
+  ctx.font = 'bold 11px sans-serif';
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillText('★', lx + 10, ly + lh / 2);
+  ctx.restore();
+
+  ctx.fillStyle = '#c8a500'; ctx.font = 'bold 9px "Courier New"';
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillText('TRICKY=2×pts', lx + 24, ly + lh / 2);
+
+  ctx.fillStyle = '#888';
+  ctx.fillText('·', lx + 120, ly + lh / 2);
+
+  // ? icon + AMBIGUOUS label
+  const ap = 0.5 + 0.5 * Math.sin(now / 820);
+  ctx.save();
+  ctx.shadowColor = '#cc88ff'; ctx.shadowBlur = 3 + ap * 4;
+  ctx.fillStyle   = `rgba(160,80,220,${0.8 + 0.2 * ap})`;
+  ctx.font = 'bold 11px sans-serif';
+  ctx.fillText('?', lx + 130, ly + lh / 2);
+  ctx.restore();
+
+  ctx.fillStyle = '#a060e0'; ctx.font = 'bold 9px "Courier New"';
+  ctx.fillText('AMBIGUOUS', lx + 144, ly + lh / 2);
+
+  ctx.fillStyle = '#888';
+  ctx.fillText('·  [P] PAUSE  ·  [R] RESTART', lx + 232, ly + lh / 2);
 }
 
 // ── Draw: floating feedback text ──────────────────────────────
 function drawFeedback() {
   for (const f of st.feedback) {
+    const a = clamp(f.life / 48, 0, 1);
     ctx.save();
-    ctx.globalAlpha = clamp(f.life / 48, 0, 1);
-    ctx.fillStyle = f.color;
-    ctx.font = `bold 18px "Courier New"`;
-    ctx.textAlign = 'center';
+    ctx.globalAlpha = a;
+    // subtle glow behind text
+    ctx.shadowColor  = f.color;
+    ctx.shadowBlur   = 8;
+    ctx.fillStyle    = f.color;
+    ctx.font         = `bold 18px "Courier New"`;
+    ctx.textAlign    = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(f.text, f.x, f.y);
     ctx.restore();
@@ -404,60 +933,143 @@ function drawFeedback() {
 
 // ── Draw: game over screen ────────────────────────────────────
 function drawGameOver() {
-  ctx.fillStyle = 'rgba(0,0,0,.8)';
+  // dark overlay
+  ctx.fillStyle = 'rgba(0,0,0,.82)';
   ctx.fillRect(0, 0, W, H);
 
-  ctx.fillStyle = '#d9534f';
-  ctx.font = 'bold 46px "Courier New"';
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText('GAME OVER', W / 2, H / 2 - 64);
+  // pulsing red glow behind GAME OVER text
+  const gp = 0.5 + 0.5 * Math.sin(Date.now() / 400);
+  ctx.shadowColor = '#d9534f';
+  ctx.shadowBlur  = 20 + gp * 20;
+  ctx.fillStyle   = '#d9534f';
+  ctx.font        = 'bold 46px "Courier New"';
+  ctx.textAlign   = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('GAME OVER', W / 2, H / 2 - 66);
+  ctx.shadowBlur = 0;
 
-  ctx.fillStyle = '#aaa';
+  ctx.fillStyle = '#888';
   ctx.font = '15px "Courier New"';
-  ctx.fillText('You grew too big from bad sorting!', W / 2, H / 2 - 22);
+  ctx.fillText('You grew too big from bad sorting!', W / 2, H / 2 - 30);
+
+  ctx.fillStyle = '#a060e0';
+  ctx.font = '14px "Courier New"';
+  ctx.fillText(`Reached Level ${st.level}`, W / 2, H / 2 - 10);
 
   ctx.fillStyle = '#fff';
   ctx.font = 'bold 22px "Courier New"';
   ctx.fillText(`Score: ${st.score}`, W / 2, H / 2 + 16);
 
-  if (st.score === st.hi && st.hi > 0) {
+  if (st.score > 0 && st.score === st.hi) {
     ctx.fillStyle = '#c8a000';
+    ctx.shadowColor = '#c8a000'; ctx.shadowBlur = 12;
     ctx.font = 'bold 14px "Courier New"';
-    ctx.fillText('★  NEW HIGH SCORE  ★', W / 2, H / 2 + 48);
+    ctx.fillText('★  NEW HIGH SCORE  ★', W / 2, H / 2 + 46);
+    ctx.shadowBlur = 0;
   }
 
   // play again button
+  const bx = W / 2 - 100, by = H / 2 + 68;
   ctx.fillStyle = '#3a6a20';
-  rr(W / 2 - 100, H / 2 + 70, 200, 50, 10); ctx.fill();
+  rr(bx, by, 200, 50, 10); ctx.fill();
   ctx.strokeStyle = '#6bb03f'; ctx.lineWidth = 2;
-  rr(W / 2 - 100, H / 2 + 70, 200, 50, 10); ctx.stroke();
+  rr(bx, by, 200, 50, 10); ctx.stroke();
   ctx.fillStyle = '#fff';
   ctx.font = 'bold 19px "Courier New"';
-  ctx.fillText('PLAY AGAIN', W / 2, H / 2 + 95);
+  ctx.fillText('PLAY AGAIN', W / 2, by + 25);
+}
+
+// ── Draw: level-up banner ─────────────────────────────────────
+function drawLevelUp() {
+  if (st.levelUpAnim <= 0) return;
+  const t = st.levelUpAnim;
+  const alpha = t > 100 ? (120 - t) / 20 : t < 30 ? t / 30 : 1;
+  const msgs = { 2: 'Items fall faster!', 3: 'Tricky items appear!', 4: 'Even trickier!', 5: 'Expert mode!' };
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(0, H / 2 - 50, W, 100);
+  ctx.fillStyle = '#FFD700';
+  ctx.shadowColor = '#FFD700'; ctx.shadowBlur = 20;
+  ctx.font = 'bold 42px "Courier New"';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(`LEVEL ${st.level}!`, W / 2, H / 2 - 15);
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#aaa'; ctx.font = '15px "Courier New"';
+  ctx.fillText(msgs[st.level] || 'Faster & trickier!', W / 2, H / 2 + 20);
+  ctx.restore();
+}
+
+// ── Draw: pause overlay ───────────────────────────────────────
+function drawPause() {
+  if (!st.paused) return;
+  ctx.fillStyle = 'rgba(0,0,0,0.72)';
+  ctx.fillRect(0, 0, W, H);
+  const px = W / 2 - 130, py = H / 2 - 110, pw = 260, ph = 220;
+  ctx.fillStyle = 'rgba(10,20,10,0.95)';
+  rr(px, py, pw, ph, 12); ctx.fill();
+  ctx.strokeStyle = '#3a6a2a'; ctx.lineWidth = 2;
+  rr(px, py, pw, ph, 12); ctx.stroke();
+  ctx.fillStyle = '#7ac142';
+  ctx.font = 'bold 34px "Courier New"';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('PAUSED', W / 2, py + 45);
+  ctx.fillStyle = '#888'; ctx.font = '13px "Courier New"';
+  ctx.fillText(`Score: ${st.score}  ·  Level: ${st.level}`, W / 2, py + 80);
+  // RESUME button
+  ctx.fillStyle = '#3a6a20';
+  rr(W / 2 - 90, py + 100, 180, 40, 8); ctx.fill();
+  ctx.strokeStyle = '#6bb03f'; ctx.lineWidth = 1.5;
+  rr(W / 2 - 90, py + 100, 180, 40, 8); ctx.stroke();
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 15px "Courier New"';
+  ctx.fillText('RESUME  [ESC]', W / 2, py + 120);
+  // RESTART button
+  ctx.fillStyle = '#3a2020';
+  rr(W / 2 - 90, py + 152, 180, 40, 8); ctx.fill();
+  ctx.strokeStyle = '#8a3a2a'; ctx.lineWidth = 1.5;
+  rr(W / 2 - 90, py + 152, 180, 40, 8); ctx.stroke();
+  ctx.fillStyle = '#ddd'; ctx.font = 'bold 15px "Courier New"';
+  ctx.fillText('RESTART  [R]', W / 2, py + 172);
 }
 
 // ── Update ────────────────────────────────────────────────────
 function update() {
-  if (st.over) return;
+  if (st.over || st.paused) return;
 
-  // spawn
+  // level-up banner countdown
+  if (st.levelUpAnim > 0) st.levelUpAnim--;
+
+  // spawn items
   st.spawnTimer++;
   if (st.spawnTimer >= st.spawnInterval && st.items.length < 4) {
     spawnItem();
     st.spawnTimer = 0;
-    st.spawnInterval = Math.max(95, 200 - Math.floor(st.score / 40) * 15);
+    st.spawnInterval = Math.max(75, 200 - (st.level - 1) * 16);
   }
 
-  // move items; check if missed
+  // move items
   for (let i = st.items.length - 1; i >= 0; i--) {
     const it = st.items[i];
+
+    // entrance animation
+    if (it.enterT < 1) it.enterT = Math.min(1, it.enterT + 1 / 25);
+
     if (st.drag && st.drag.item.id === it.id) continue;
+
+    // sinusoidal wobble sway
     it.y += it.vy;
+    it.x = it.baseX + Math.sin(it.wobblePhase) * it.wobbleAmp;
+    it.wobblePhase += it.wobbleFreq;
+
+    // decay tilt back to upright
+    it.rotation *= 0.88;
+
     if (it.y > BIN_Y + 10) {
       st.items.splice(i, 1);
       st.score = Math.max(0, st.score - 3);
       st.scale = Math.min(MAX_SCALE, st.scale + 0.14);
-      push(`MISSED -3`, it.x, BIN_Y - 35, '#f0ad4e');
+      push('MISSED  -3', it.x, BIN_Y - 35, '#f0ad4e');
+      spawnSparks(it.x, BIN_Y);
+      sfxMiss();
       if (st.scale >= MAX_SCALE) endGame();
     }
   }
@@ -472,32 +1084,64 @@ function update() {
   for (const k in st.binFlash) {
     if (--st.binFlash[k] <= 0) delete st.binFlash[k];
   }
+
+  updateParticles();
+  updateClouds();
 }
 
 function push(text, x, y, color) {
-  st.feedback.push({ text, x, y, life: 58, color });
+  st.feedback.push({ text, x, y, life: 60, color });
 }
 
 function endGame() {
   st.over = true;
-  st.hi = Math.max(st.hi, st.score);
+  st.hi   = Math.max(st.hi, st.score);
+  sfxGameOver();
 }
 
 // ── Sort logic ────────────────────────────────────────────────
 function sortItem(item, bin) {
-  const idx = BINS.indexOf(bin);
+  const idx    = BINS.indexOf(bin);
+  const binCx  = bin.x + bin.w / 2;
   st.items.splice(st.items.indexOf(item), 1);
-  st.binFlash[idx] = 20;
+  st.binFlash[idx] = 22;
 
   if (item.cat === bin.cat) {
-    st.score += 10;
-    st.scale = Math.max(MIN_SCALE, st.scale - 0.13);
-    push('+10  CORRECT!', bin.x + bin.w / 2, bin.y - 12, '#7ac142');
+    st.correctSorts++;
+    if (item.bonus) {
+      // ── Correct bonus sort ── 2× points, extra shrink, gold fanfare
+      st.score += 20;
+      st.scale  = Math.max(MIN_SCALE, st.scale - 0.24);
+      push('+20  ★ BONUS!',  binCx, bin.y - 22, '#FFD700');
+      push('CORRECTLY SORTED!', binCx, bin.y - 40, '#FFE55C');
+      spawnBonusBurst(binCx, bin.y + 2);
+      sfxBonusCorrect();
+    } else {
+      // ── Correct regular sort ──
+      st.score += 10;
+      st.scale  = Math.max(MIN_SCALE, st.scale - 0.13);
+      push('+10  CORRECT!', binCx, bin.y - 14, '#7ac142');
+      spawnBurst(binCx, bin.y + 2, bin);
+      sfxCorrect();
+    }
+    // level-up check
+    const newLevel = Math.floor(st.correctSorts / 10) + 1;
+    if (newLevel > st.level) {
+      st.level = newLevel;
+      st.levelUpAnim = 120;
+      sfxLevelUp();
+    }
   } else {
-    st.score = Math.max(0, st.score - 5);
-    st.scale = Math.min(MAX_SCALE, st.scale + 0.26);
-    push('-5  WRONG!', bin.x + bin.w / 2, bin.y - 12, '#d9534f');
+    // ── Wrong sort — penalty scales with bonus status ──
+    const penalty = item.bonus ? 8 : 5;
+    const grow    = item.bonus ? 0.34 : 0.26;
+    st.score = Math.max(0, st.score - penalty);
+    st.scale = Math.min(MAX_SCALE, st.scale + grow);
+    push(`-${penalty}  WRONG!`, binCx, bin.y - 14, '#d9534f');
     push(`→ ${item.cat.toUpperCase()}`, item.x, item.y - 44, '#f0ad4e');
+    if (item.bonus) push('TRICKY ITEM!', item.x, item.y - 62, '#FFD700');
+    spawnSmoke(item.x, item.y);
+    sfxWrong();
     if (st.scale >= MAX_SCALE) endGame();
   }
 }
@@ -506,18 +1150,31 @@ function sortItem(item, bin) {
 function loop() {
   update();
   ctx.clearRect(0, 0, W, H);
+
   drawBG();
+  if (!st.over && !st.paused) drawClouds();   // methane behind character
   drawBins();
   drawCharacter(st.scale);
 
-  // non-dragged items first, dragged on top
   for (const it of st.items)
     if (!st.drag || st.drag.item.id !== it.id) drawItem(it);
   if (st.drag) drawItem(st.drag.item);
 
+  drawParticles();
   drawHUD();
   drawFeedback();
+  drawLevelUp();
   if (st.over) drawGameOver();
+  drawPause();
+
+  // dynamic canvas glow — colour shifts green→amber→red as danger rises
+  const pct = clamp((st.scale - 1.0) / (MAX_SCALE - 1.0), 0, 1);
+  let glowColor;
+  if      (pct < 0.35) glowColor = `rgba(42,100,42,${0.35 + pct * 0.35})`;
+  else if (pct < 0.72) glowColor = `rgba(190,120,10,${0.40 + pct * 0.30})`;
+  else                 glowColor = `rgba(210,45,25,${0.55 + pct * 0.35})`;
+  gameWrap.style.setProperty('--danger', glowColor);
+
   requestAnimationFrame(loop);
 }
 
@@ -542,31 +1199,52 @@ function binAt(x, y) {
 }
 
 function onDown(e) {
+  initAudio();
   const p = getPos(e);
-  if (st.over) {
-    if (p.x >= W/2 - 100 && p.x <= W/2 + 100 && p.y >= H/2 + 70 && p.y <= H/2 + 120) {
-      reset();
+  if (st.paused) {
+    const py = H / 2 - 110;
+    // RESUME button
+    if (p.x >= W / 2 - 90 && p.x <= W / 2 + 90 && p.y >= py + 100 && p.y <= py + 140) {
+      togglePause(); return;
     }
+    // RESTART button
+    if (p.x >= W / 2 - 90 && p.x <= W / 2 + 90 && p.y >= py + 152 && p.y <= py + 192) {
+      reset(); return;
+    }
+    return;
+  }
+  if (st.over) {
+    const bx = W / 2 - 100, by = H / 2 + 68;
+    if (p.x >= bx && p.x <= bx + 200 && p.y >= by && p.y <= by + 50) reset();
     return;
   }
   const it = itemAt(p.x, p.y);
   if (it) {
-    st.drag = { item: it, ox: p.x - it.x, oy: p.y - it.y };
+    st.drag = { item: it, ox: p.x - it.x, oy: p.y - it.y, prevX: it.x };
     canvas.style.cursor = 'grabbing';
+    sfxPickup();
   }
 }
 
 function onMove(e) {
   if (!st.drag) return;
   const p = getPos(e);
-  st.drag.item.x = p.x - st.drag.ox;
-  st.drag.item.y = p.y - st.drag.oy;
+  st.drag.prevX       = st.drag.item.x;
+  st.drag.item.x      = p.x - st.drag.ox;
+  st.drag.item.y      = p.y - st.drag.oy;
+  const vx            = st.drag.item.x - st.drag.prevX;
+  st.drag.item.rotation = clamp(vx * 0.06, -Math.PI / 12, Math.PI / 12);
 }
 
 function onUp() {
   if (!st.drag) return;
   const bin = binAt(st.drag.item.x, st.drag.item.y);
-  if (bin) sortItem(st.drag.item, bin);
+  if (bin) {
+    sortItem(st.drag.item, bin);
+  } else {
+    // snap baseX to released position so wobble resumes smoothly
+    st.drag.item.baseX = st.drag.item.x;
+  }
   st.drag = null;
   canvas.style.cursor = 'default';
 }
@@ -574,10 +1252,30 @@ function onUp() {
 canvas.addEventListener('mousedown',  onDown);
 canvas.addEventListener('mousemove',  onMove);
 canvas.addEventListener('mouseup',    onUp);
-canvas.addEventListener('mouseleave', () => { st.drag = null; canvas.style.cursor = 'default'; });
+canvas.addEventListener('mouseleave', () => {
+  if (st.drag) { st.drag.item.baseX = st.drag.item.x; }
+  st.drag = null; canvas.style.cursor = 'default';
+});
 canvas.addEventListener('touchstart', e => { e.preventDefault(); onDown(e); }, { passive: false });
 canvas.addEventListener('touchmove',  e => { e.preventDefault(); onMove(e); }, { passive: false });
 canvas.addEventListener('touchend',   e => { e.preventDefault(); onUp();    }, { passive: false });
+
+function togglePause() {
+  st.paused = !st.paused;
+  if (st.paused && st.drag) {
+    st.drag.item.baseX = st.drag.item.x;
+    st.drag = null;
+    canvas.style.cursor = 'default';
+  }
+  sfxPause();
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' || e.key === 'p' || e.key === 'P') {
+    if (!st.over) togglePause();
+  }
+  if ((e.key === 'r' || e.key === 'R') && (st.over || st.paused)) reset();
+});
 
 function reset() {
   const hi = st.hi;
